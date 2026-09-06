@@ -28,8 +28,41 @@ python3 -c "import numpy; print('numpy available')"
 ## Usage
 
 ```bash
+# Offline demo (simulated federation, no network, no external FL platform) — exit 0
 python3 fl_attack.py
+
+# Tunable experiment
+python3 fl_attack.py --clients 6 --rounds 5 --features 10 --seed 42
+
+# JSON report to reports/ (gitignored)
+python3 fl_attack.py --output reports/ai6-report.json
+
+# Quiet CI mode + JSON
+python3 fl_attack.py --quiet --output reports/ai6-report.json
 ```
+
+### Exit Codes
+
+- `0` — experiment completed cleanly
+- `1` — error (bad arguments / report write failure)
+
+### Live Lab Test Plan
+
+Runs entirely offline — clients, server, aggregators, and drift data are all
+simulated locally; nothing is downloaded and no external FL infrastructure is queried.
+
+1. **Demo**: `python3 fl_attack.py` — expect baseline, sign-flip poisoning, gradient inversion, free-rider, Krum, and trimmed-mean blocks plus a summary. Exit `0`.
+2. **Poisoning impact**: compare `baseline.accuracy` vs `poisoning.accuracy_under_attack` and confirm the accuracy drop range.
+3. **Defense recovery**: `defenses.krum_accuracy` / `defenses.trimmed_mean_accuracy` vs poisoned accuracy — defenses should recover accuracy.
+4. **JSON report**: `python3 fl_attack.py --output reports/ai6-report.json` — verify `poisoning`, `gradient_inversion`, `free_rider`, `defenses`, `summary` present.
+5. **Unit tests**: `python3 -m unittest discover -s tests -v` — all pass (client update shapes, mean aggregation, sign-flip math, Byzantine outlier detection over a 6-client pool, structured results, determinism, CLI JSON write).
+
+## Metrics
+
+- Real attack/defense code paths exercised offline: `FederatedClient.local_train`, `FederatedServer.aggregate_mean/aggregate_krum/aggregate_trimmed_mean`, `ModelUpdatePoisoner.sign_flip_poison/scale_poison`, `GradientInverter.invert/batch_invert`, `FreeRider.generate_fake_update`, `ByzantineDetector.detect_outliers`, `test_client`
+- Metrics emitted per scenario: accuracy + accuracy drop for poisoning; inverted-sample shape/norm; honest vs free-rider accuracy with benefit flag; Krum/trimmed accuracy plus improvement-over-poisoned
+- 7 unit tests; exit-code contract `0` clean / `1` error
+- Zero runtime cloud/network dependencies; offline demo needs only numpy
 
 ## Example Output
 

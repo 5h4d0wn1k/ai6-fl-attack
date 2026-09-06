@@ -364,28 +364,23 @@ def test_client(client, X_test, y_test):
     return accuracy(client.predict, X_test, y_test)
 
 
-def main():
-    print("=" * 60)
-    print("AI6 — Federated Learning Attack Demonstration")
-    print("=" * 60)
+def run_experiment(input_size: int = 10, num_classes: int = 3,
+                   num_clients: int = 6, num_rounds: int = 5,
+                   seed: int = 42) -> dict:
+    """Run the full federated learning attack experiment, returning results."""
+    np.random.seed(seed)
+    clients = [FederatedClient(i, input_size, num_classes, data_size=150,
+                               seed=seed + i)
+               for i in range(num_clients)]
+    server = FederatedServer(input_size, num_classes, num_clients)
 
-    INPUT_SIZE = 10
-    NUM_CLASSES = 3
-    NUM_CLIENTS = 6
-    NUM_ROUNDS = 5
+    X_test = np.random.randn(200, input_size)
+    y_test = np.random.RandomState(99).randint(0, num_classes, 200)
 
-    clients = [FederatedClient(i, INPUT_SIZE, NUM_CLASSES, data_size=150, seed=42 + i)
-               for i in range(NUM_CLIENTS)]
-    server = FederatedServer(INPUT_SIZE, NUM_CLASSES, NUM_CLIENTS)
-
-    X_test = np.random.randn(200, INPUT_SIZE)
-    y_test = np.random.RandomState(99).randint(0, NUM_CLASSES, 200)
-
-    print("\n[1] Baseline federated learning (no attacks)...")
-    for round_num in range(NUM_ROUNDS):
+    # [1] Baseline
+    for _ in range(num_rounds):
         global_w, global_b = server.broadcast()
-        updates_w = []
-        updates_b = []
+        updates_w, updates_b = [], []
         for client in clients:
             client.weights = [w.copy() for w in global_w]
             client.biases = [b.copy() for b in global_b]
@@ -394,24 +389,22 @@ def main():
             updates_b.append(ub)
         agg_w, agg_b = server.aggregate_mean(updates_w, updates_b)
         server.set_global_model(agg_w, agg_b)
-
         for client in clients:
             client.weights = [w.copy() for w in server.global_weights]
             client.biases = [b.copy() for b in server.global_biases]
 
-    acc_baseline = test_client(clients[0], X_test, y_test)
-    print(f"    Baseline accuracy after {NUM_ROUNDS} rounds: {acc_baseline:.4f}")
+    acc_baseline = float(test_client(clients[0], X_test, y_test))
 
-    print("\n[2] Model update poisoning (sign flip attack)...")
-    server2 = FederatedServer(INPUT_SIZE, NUM_CLASSES, NUM_CLIENTS)
-    clients2 = [FederatedClient(i, INPUT_SIZE, NUM_CLASSES, data_size=150, seed=42 + i)
-                for i in range(NUM_CLIENTS)]
+    # [2] Model update poisoning (sign flip)
+    server2 = FederatedServer(input_size, num_classes, num_clients)
+    clients2 = [FederatedClient(i, input_size, num_classes, data_size=150,
+                                seed=seed + i)
+                for i in range(num_clients)]
     poisoner = ModelUpdatePoisoner(scale_factor=5.0)
 
-    for round_num in range(NUM_ROUNDS):
+    for _ in range(num_rounds):
         global_w, global_b = server2.broadcast()
-        updates_w = []
-        updates_b = []
+        updates_w, updates_b = [], []
         for i, client in enumerate(clients2):
             client.weights = [w.copy() for w in global_w]
             client.biases = [b.copy() for b in global_b]
@@ -426,46 +419,38 @@ def main():
             client.weights = [w.copy() for w in server2.global_weights]
             client.biases = [b.copy() for b in server2.global_biases]
 
-    acc_poisoned = test_client(clients2[0], X_test, y_test)
-    print(f"    Accuracy under poisoning: {acc_poisoned:.4f}")
-    print(f"    Accuracy drop: {acc_baseline - acc_poisoned:+.4f}")
+    acc_poisoned = float(test_client(clients2[0], X_test, y_test))
 
-    print("\n[3] Gradient inversion attack...")
-    gradient_inv = GradientInverter(INPUT_SIZE, NUM_CLASSES, max_iters=300, lr=0.05)
+    # [3] Gradient inversion
+    gradient_inv = GradientInverter(input_size, num_classes, max_iters=300, lr=0.05)
     target_client = clients[0]
-    client_w_backup = [w.copy() for w in target_client.weights]
-    client_b_backup = [b.copy() for b in target_client.biases]
+    backup_w = [w.copy() for w in target_client.weights]
+    backup_b = [b.copy() for b in target_client.biases]
     global_w_ref = [w.copy() for w in server.global_weights]
     global_b_ref = [b.copy() for b in server.global_biases]
     target_client.weights = [w.copy() for w in global_w_ref]
     target_client.biases = [b.copy() for b in global_b_ref]
     real_update_w, real_update_b = target_client.local_train(epochs=3, lr=0.01)
-    target_client.weights = client_w_backup
-    target_client.biases = client_b_backup
+    target_client.weights = backup_w
+    target_client.biases = backup_b
 
     X_inv = gradient_inv.invert(real_update_w, real_update_b, target_label=0)
-    X_inv_norm = np.linalg.norm(X_inv)
-    X_real_norm = np.linalg.norm(target_client.X[:1])
-    print(f"    Recovered gradient norm: {X_inv_norm:.4f}")
-    print(f"    Inverted sample shape:  {X_inv.shape}")
-
     X_batch = gradient_inv.batch_invert(real_update_w, real_update_b, batch_size=3)
-    print(f"    Batch inversion shape:  {X_batch.shape}")
 
-    print("\n[4] Free-rider attack...")
-    server3 = FederatedServer(INPUT_SIZE, NUM_CLASSES, NUM_CLIENTS)
-    clients3 = [FederatedClient(i, INPUT_SIZE, NUM_CLASSES, data_size=150, seed=42 + i)
-                for i in range(NUM_CLIENTS)]
-    free_rider = FreeRider(INPUT_SIZE, NUM_CLASSES)
+    # [4] Free-rider attack
+    server3 = FederatedServer(input_size, num_classes, num_clients)
+    clients3 = [FederatedClient(i, input_size, num_classes, data_size=150,
+                                seed=seed + i)
+                for i in range(num_clients)]
+    free_rider = FreeRider(input_size, num_classes)
 
-    for round_num in range(NUM_ROUNDS):
+    for _ in range(num_rounds):
         global_w, global_b = server3.broadcast()
-        updates_w = []
-        updates_b = []
+        updates_w, updates_b = [], []
         for i, client in enumerate(clients3):
             client.weights = [w.copy() for w in global_w]
             client.biases = [b.copy() for b in global_b]
-            if i < NUM_CLIENTS - 1:
+            if i < num_clients - 1:
                 uw, ub = client.local_train(epochs=5, lr=0.01)
             else:
                 uw, ub = free_rider.generate_fake_update(magnitude=0.0001)
@@ -477,27 +462,23 @@ def main():
             client.weights = [w.copy() for w in server3.global_weights]
             client.biases = [b.copy() for b in server3.global_biases]
 
-    acc_freerider = test_client(clients3[0], X_test, y_test)
-    honest_client_acc = test_client(clients3[0], X_test, y_test)
+    honest_client_acc = float(test_client(clients3[0], X_test, y_test))
     fr_client = clients3[-1]
     fr_client.weights = [w.copy() for w in server3.global_weights]
     fr_client.biases = [b.copy() for b in server3.global_biases]
-    acc_freerider_benefit = test_client(fr_client, X_test, y_test)
-    print(f"    Honest client accuracy: {honest_client_acc:.4f}")
-    print(f"    Free-rider accuracy:    {acc_freerider_benefit:.4f}")
-    print(f"    Free-rider got benefit: {acc_freerider_benefit >= honest_client_acc * 0.9}")
+    acc_freerider_benefit = float(test_client(fr_client, X_test, y_test))
 
-    print("\n[5] Byzantine tolerance bypass (Krum aggregation)...")
-    server4 = FederatedServer(INPUT_SIZE, NUM_CLASSES, NUM_CLIENTS)
-    clients4 = [FederatedClient(i, INPUT_SIZE, NUM_CLASSES, data_size=150, seed=42 + i)
-                for i in range(NUM_CLIENTS)]
+    # [5] Byzantine tolerance bypass (Krum)
+    server4 = FederatedServer(input_size, num_classes, num_clients)
+    clients4 = [FederatedClient(i, input_size, num_classes, data_size=150,
+                                seed=seed + i)
+                for i in range(num_clients)]
     poisoner2 = ModelUpdatePoisoner(scale_factor=10.0)
-
     detector = ByzantineDetector()
-    for round_num in range(NUM_ROUNDS):
+
+    for _ in range(num_rounds):
         global_w, global_b = server4.broadcast()
-        updates_w = []
-        updates_b = []
+        updates_w, updates_b = [], []
         for i, client in enumerate(clients4):
             client.weights = [w.copy() for w in global_w]
             client.biases = [b.copy() for b in global_b]
@@ -507,10 +488,13 @@ def main():
             updates_w.append(uw)
             updates_b.append(ub)
 
-        outlier_ids, norms = detector.detect_outliers(updates_w, updates_b, threshold=2.0)
+        outlier_ids, _ = detector.detect_outliers(updates_w, updates_b,
+                                                  threshold=2.0)
         if len(outlier_ids) > 0 and len(outlier_ids) < len(updates_w):
-            clean_w = [updates_w[i] for i in range(len(updates_w)) if i not in outlier_ids]
-            clean_b = [updates_b[i] for i in range(len(updates_b)) if i not in outlier_ids]
+            clean_w = [updates_w[i] for i in range(len(updates_w))
+                       if i not in outlier_ids]
+            clean_b = [updates_b[i] for i in range(len(updates_b))
+                       if i not in outlier_ids]
         else:
             clean_w = updates_w
             clean_b = updates_b
@@ -521,20 +505,17 @@ def main():
             client.weights = [w.copy() for w in server4.global_weights]
             client.biases = [b.copy() for b in server4.global_biases]
 
-    acc_krum = test_client(clients4[0], X_test, y_test)
-    print(f"    Krum accuracy (with detection): {acc_krum:.4f}")
-    print(f"    vs poisoned mean: {acc_poisoned:.4f}")
-    print(f"    Improvement: {acc_krum - acc_poisoned:+.4f}")
+    acc_krum = float(test_client(clients4[0], X_test, y_test))
 
-    print("\n[6] Trimmed mean aggregation defense...")
-    server5 = FederatedServer(INPUT_SIZE, NUM_CLASSES, NUM_CLIENTS)
-    clients5 = [FederatedClient(i, INPUT_SIZE, NUM_CLASSES, data_size=150, seed=42 + i)
-                for i in range(NUM_CLIENTS)]
+    # [6] Trimmed mean defense
+    server5 = FederatedServer(input_size, num_classes, num_clients)
+    clients5 = [FederatedClient(i, input_size, num_classes, data_size=150,
+                                seed=seed + i)
+                for i in range(num_clients)]
 
-    for round_num in range(NUM_ROUNDS):
+    for _ in range(num_rounds):
         global_w, global_b = server5.broadcast()
-        updates_w = []
-        updates_b = []
+        updates_w, updates_b = [], []
         for i, client in enumerate(clients5):
             client.weights = [w.copy() for w in global_w]
             client.biases = [b.copy() for b in global_b]
@@ -543,26 +524,135 @@ def main():
                 uw, ub = poisoner2.sign_flip_poison(uw, ub)
             updates_w.append(uw)
             updates_b.append(ub)
-        agg_w, agg_b = server5.aggregate_trimmed_mean(updates_w, updates_b, trim_ratio=0.2)
+        agg_w, agg_b = server5.aggregate_trimmed_mean(updates_w, updates_b,
+                                                      trim_ratio=0.2)
         server5.set_global_model(agg_w, agg_b)
         for client in clients5:
             client.weights = [w.copy() for w in server5.global_weights]
             client.biases = [b.copy() for b in server5.global_biases]
 
-    acc_trimmed = test_client(clients5[0], X_test, y_test)
-    print(f"    Trimmed mean accuracy: {acc_trimmed:.4f}")
+    acc_trimmed = float(test_client(clients5[0], X_test, y_test))
 
-    print("\n" + "=" * 60)
-    print("Results Summary:")
-    print(f"  Baseline:          {acc_baseline:.4f}")
-    print(f"  Under poisoning:   {acc_poisoned:.4f}")
-    print(f"  Krum defense:      {acc_krum:.4f}")
-    print(f"  Trimmed defense:   {acc_trimmed:.4f}")
-    print(f"  Free-rider benefit: {acc_freerider_benefit:.4f}")
-    print("=" * 60)
-    print("Demonstration complete.")
-    print("=" * 60)
+    return {
+        "setup": {
+            "input_size": input_size,
+            "num_classes": num_classes,
+            "num_clients": num_clients,
+            "num_rounds": num_rounds,
+            "seed": seed,
+        },
+        "baseline": {"accuracy": acc_baseline},
+        "poisoning": {
+            "accuracy_under_attack": acc_poisoned,
+            "accuracy_drop": acc_baseline - acc_poisoned,
+        },
+        "gradient_inversion": {
+            "inverted_sample_shape": list(X_inv.shape),
+            "inverted_norm": float(np.linalg.norm(X_inv)),
+            "batch_inverted_shape": list(X_batch.shape),
+        },
+        "free_rider": {
+            "honest_client_accuracy": honest_client_acc,
+            "free_rider_accuracy": acc_freerider_benefit,
+            "free_rider_benefit": bool(
+                acc_freerider_benefit >= honest_client_acc * 0.9),
+        },
+        "defenses": {
+            "krum_accuracy": acc_krum,
+            "trimmed_mean_accuracy": acc_trimmed,
+            "krum_improvement_over_poisoned": acc_krum - acc_poisoned,
+            "trimmed_improvement_over_poisoned": acc_trimmed - acc_poisoned,
+        },
+        "summary": {
+            "baseline": acc_baseline,
+            "under_poisoning": acc_poisoned,
+            "krum_defense": acc_krum,
+            "trimmed_defense": acc_trimmed,
+            "free_rider_benefit": acc_freerider_benefit,
+        },
+    }
+
+
+def format_report(results: dict) -> str:
+    lines = []
+    lines.append("=" * 60)
+    lines.append("AI6 — Federated Learning Attack Demonstration")
+    lines.append("=" * 60)
+
+    lines.append("\n[1] Baseline federated learning (no attacks)...")
+    lines.append(f"    Baseline accuracy: {results['baseline']['accuracy']:.4f}")
+
+    lines.append("\n[2] Model update poisoning (sign flip attack)...")
+    p = results["poisoning"]
+    lines.append(f"    Accuracy under poisoning: {p['accuracy_under_attack']:.4f}")
+    lines.append(f"    Accuracy drop: {p['accuracy_drop']:+.4f}")
+
+    lines.append("\n[3] Gradient inversion attack...")
+    gi = results["gradient_inversion"]
+    lines.append(f"    Inverted sample shape:  {gi['inverted_sample_shape']}")
+    lines.append(f"    Recovered gradient norm: {gi['inverted_norm']:.4f}")
+    lines.append(f"    Batch inversion shape:  {gi['batch_inverted_shape']}")
+
+    lines.append("\n[4] Free-rider attack...")
+    fr = results["free_rider"]
+    lines.append(f"    Honest client accuracy: {fr['honest_client_accuracy']:.4f}")
+    lines.append(f"    Free-rider accuracy:    {fr['free_rider_accuracy']:.4f}")
+    lines.append(f"    Free-rider got benefit: {fr['free_rider_benefit']}")
+
+    lines.append("\n[5] Byzantine tolerance bypass (Krum aggregation)...")
+    d = results["defenses"]
+    lines.append(f"    Krum accuracy (with detection): {d['krum_accuracy']:.4f}")
+    lines.append(f"    Improvement: {d['krum_improvement_over_poisoned']:+.4f}")
+
+    lines.append("\n[6] Trimmed mean aggregation defense...")
+    lines.append(f"    Trimmed mean accuracy: {d['trimmed_mean_accuracy']:.4f}")
+
+    lines.append("\n" + "=" * 60)
+    lines.append("Results Summary:")
+    for k, v in results["summary"].items():
+        lines.append(f"  {k.replace('_', ' ').title():<22}{v:.4f}")
+    lines.append("=" * 60)
+    lines.append("Demonstration complete.")
+    lines.append("=" * 60)
+    return "\n".join(lines)
+
+
+def main(argv=None):
+    import argparse
+    import json
+    import os
+
+    parser = argparse.ArgumentParser(
+        prog="ai6-fl-attack",
+        description="Federated learning attack research: update poisoning, "
+                    "gradient inversion, free-rider, Byzantine bypass. "
+                    "Offline, self-contained.")
+    parser.add_argument("--clients", type=int, default=6,
+                        help="number of simulated clients")
+    parser.add_argument("--rounds", type=int, default=5,
+                        help="federated rounds per scenario")
+    parser.add_argument("--features", type=int, default=10,
+                        help="input feature count")
+    parser.add_argument("--seed", type=int, default=42, help="RNG seed")
+    parser.add_argument("--output", metavar="FILE",
+                        help="write JSON report to FILE (e.g. reports/ai6-report.json)")
+    parser.add_argument("--quiet", action="store_true",
+                        help="suppress human-readable output")
+    args = parser.parse_args(argv)
+
+    results = run_experiment(input_size=args.features,
+                             num_clients=args.clients,
+                             num_rounds=args.rounds, seed=args.seed)
+
+    if args.output:
+        out_dir = os.path.dirname(os.path.abspath(args.output))
+        os.makedirs(out_dir, exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as fh:
+            json.dump(results, fh, indent=2)
+    if not args.quiet:
+        print(format_report(results))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
