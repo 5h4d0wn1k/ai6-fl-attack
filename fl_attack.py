@@ -360,7 +360,7 @@ def accuracy(model_func, X, y):
     return np.mean(preds == y)
 
 
-def test_client(client, X_test, y_test):
+def evaluate_client(client, X_test, y_test):
     return accuracy(client.predict, X_test, y_test)
 
 
@@ -393,7 +393,7 @@ def run_experiment(input_size: int = 10, num_classes: int = 3,
             client.weights = [w.copy() for w in server.global_weights]
             client.biases = [b.copy() for b in server.global_biases]
 
-    acc_baseline = float(test_client(clients[0], X_test, y_test))
+    acc_baseline = float(evaluate_client(clients[0], X_test, y_test))
 
     # [2] Model update poisoning (sign flip)
     server2 = FederatedServer(input_size, num_classes, num_clients)
@@ -419,7 +419,7 @@ def run_experiment(input_size: int = 10, num_classes: int = 3,
             client.weights = [w.copy() for w in server2.global_weights]
             client.biases = [b.copy() for b in server2.global_biases]
 
-    acc_poisoned = float(test_client(clients2[0], X_test, y_test))
+    acc_poisoned = float(evaluate_client(clients2[0], X_test, y_test))
 
     # [3] Gradient inversion
     gradient_inv = GradientInverter(input_size, num_classes, max_iters=300, lr=0.05)
@@ -462,11 +462,11 @@ def run_experiment(input_size: int = 10, num_classes: int = 3,
             client.weights = [w.copy() for w in server3.global_weights]
             client.biases = [b.copy() for b in server3.global_biases]
 
-    honest_client_acc = float(test_client(clients3[0], X_test, y_test))
+    honest_client_acc = float(evaluate_client(clients3[0], X_test, y_test))
     fr_client = clients3[-1]
     fr_client.weights = [w.copy() for w in server3.global_weights]
     fr_client.biases = [b.copy() for b in server3.global_biases]
-    acc_freerider_benefit = float(test_client(fr_client, X_test, y_test))
+    acc_freerider_benefit = float(evaluate_client(fr_client, X_test, y_test))
 
     # [5] Byzantine tolerance bypass (Krum)
     server4 = FederatedServer(input_size, num_classes, num_clients)
@@ -505,7 +505,7 @@ def run_experiment(input_size: int = 10, num_classes: int = 3,
             client.weights = [w.copy() for w in server4.global_weights]
             client.biases = [b.copy() for b in server4.global_biases]
 
-    acc_krum = float(test_client(clients4[0], X_test, y_test))
+    acc_krum = float(evaluate_client(clients4[0], X_test, y_test))
 
     # [6] Trimmed mean defense
     server5 = FederatedServer(input_size, num_classes, num_clients)
@@ -531,7 +531,7 @@ def run_experiment(input_size: int = 10, num_classes: int = 3,
             client.weights = [w.copy() for w in server5.global_weights]
             client.biases = [b.copy() for b in server5.global_biases]
 
-    acc_trimmed = float(test_client(clients5[0], X_test, y_test))
+    acc_trimmed = float(evaluate_client(clients5[0], X_test, y_test))
 
     return {
         "setup": {

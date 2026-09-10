@@ -18,7 +18,7 @@ from fl_attack import (  # noqa: E402
     GradientInverter,
     ModelUpdatePoisoner,
     run_experiment,
-    test_client,
+    evaluate_client,
 )
 
 
