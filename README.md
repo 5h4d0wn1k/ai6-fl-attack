@@ -4,152 +4,90 @@
 > prohibited and may be illegal. Read [ETHICS.md](ETHICS.md) and
 > [SCOPE.md](SCOPE.md) before use. Use at your own risk; **AS IS**, no warranty.
 
-# AI6 — Federated Learning Attack
+# AI6 — Federated Learning Attack & Defense Framework
 
-Demonstrates attacks and defenses in federated learning systems.
+Offline security playground for **federated learning**: model-update poisoning,
+gradient inversion, free-rider attacks, and Byzantine-robust aggregation
+defenses for **artificial-intelligence security** research.
 
-## Overview
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/5h4d0wn1k/ai6-fl-attack)](https://github.com/5h4d0wn1k/ai6-fl-attack)
+[![Issues](https://img.shields.io/github/issues/5h4d0wn1k/ai6-fl-attack)](https://github.com/5h4d0wn1k/ai6-fl-attack/issues)
+[![Last commit](https://img.shields.io/github/last-commit/5h4d0wn1k/ai6-fl-attack)](https://github.com/5h4d0wn1k/ai6-fl-attack)
 
-This project implements various attacks against federated learning:
-- **Model update poisoning**: Corrupting local updates before aggregation
-- **Gradient inversion**: Recovering training data from model updates
-- **Free-rider attack**: Benefiting from aggregation without contributing
-- **Byzantine tolerance bypass**: Circumventing robust aggregation methods
+## Why
+
+Federated learning is attractive exactly because training data never leaves the
+client — but the model *updates* do, and those updates are an attack surface.
+A handful of malicious clients can poison aggregation with flipped gradients,
+free-ride on honest work, or even invert gradients to reconstruct private
+training samples. Defenders need a controllable, offline environment to measure
+how far an attack degrades accuracy and how well robust aggregation (Krum,
+trimmed mean) recovers it. AI6 simulates a complete federation — clients,
+server, aggregators, and diver — entirely on your own machine with only `numpy`
+as a dependency, so every attack and defense code path can be exercised, scored,
+and documented without touching any real ML infrastructure.
 
 ## Features
 
-- Complete federated learning simulation (clients + server)
-- Multiple aggregation strategies (mean, Krum, trimmed mean)
-- Attack implementations (sign flip, scale, Gaussian noise)
-- Gradient inversion via optimization
-- Byzantine detection and filtering
+- **Full federation simulation** — `FederatedClient` local training + `FederatedServer` (mean, Krum, trimmed-mean aggregation)
+- **Model-update poisoning** — sign-flip and scale poisoning (`ModelUpdatePoisoner`)
+- **Gradient inversion** — single and batch sample recovery (`GradientInverter`)
+- **Free-rider attack** — fake-update generation with honest-vs-free-rider benefit metric
+- **Byzantine detection** — outlier detection over a 6-client pool (`ByzantineDetector`)
+- **Deterministic offline runs** — `--clients`, `--rounds`, `--features`, `--seed`
+- **JSON reports** — `--output reports/ai6-report.json`, plus `--quiet` CI mode
 
-## Installation
+## Quickstart
 
-```bash
-# No external dependencies - numpy only
-python3 -c "import numpy; print('numpy available')"
-```
-
-## Usage
+Only dependency: `numpy`.
 
 ```bash
-# Offline demo (simulated federation, no network, no external FL platform) — exit 0
+# Offline demo — baseline, poisoning, inversion, free-rider, Krum, trimmed-mean (exit 0)
 python3 fl_attack.py
 
 # Tunable experiment
 python3 fl_attack.py --clients 6 --rounds 5 --features 10 --seed 42
 
-# JSON report to reports/ (gitignored)
+# JSON report
 python3 fl_attack.py --output reports/ai6-report.json
 
 # Quiet CI mode + JSON
 python3 fl_attack.py --quiet --output reports/ai6-report.json
+
+# Unit tests (7 cases)
+python3 -m unittest discover -s tests -v
 ```
 
-### Exit Codes
+Exit codes: `0` clean experiment, `1` bad arguments / report write failure.
 
-- `0` — experiment completed cleanly
-- `1` — error (bad arguments / report write failure)
-
-### Live Lab Test Plan
-
-Runs entirely offline — clients, server, aggregators, and drift data are all
-simulated locally; nothing is downloaded and no external FL infrastructure is queried.
-
-1. **Demo**: `python3 fl_attack.py` — expect baseline, sign-flip poisoning, gradient inversion, free-rider, Krum, and trimmed-mean blocks plus a summary. Exit `0`.
-2. **Poisoning impact**: compare `baseline.accuracy` vs `poisoning.accuracy_under_attack` and confirm the accuracy drop range.
-3. **Defense recovery**: `defenses.krum_accuracy` / `defenses.trimmed_mean_accuracy` vs poisoned accuracy — defenses should recover accuracy.
-4. **JSON report**: `python3 fl_attack.py --output reports/ai6-report.json` — verify `poisoning`, `gradient_inversion`, `free_rider`, `defenses`, `summary` present.
-5. **Unit tests**: `python3 -m unittest discover -s tests -v` — all pass (client update shapes, mean aggregation, sign-flip math, Byzantine outlier detection over a 6-client pool, structured results, determinism, CLI JSON write).
-
-## Metrics
-
-- Real attack/defense code paths exercised offline: `FederatedClient.local_train`, `FederatedServer.aggregate_mean/aggregate_krum/aggregate_trimmed_mean`, `ModelUpdatePoisoner.sign_flip_poison/scale_poison`, `GradientInverter.invert/batch_invert`, `FreeRider.generate_fake_update`, `ByzantineDetector.detect_outliers`, `test_client`
-- Metrics emitted per scenario: accuracy + accuracy drop for poisoning; inverted-sample shape/norm; honest vs free-rider accuracy with benefit flag; Krum/trimmed accuracy plus improvement-over-poisoned
-- 7 unit tests; exit-code contract `0` clean / `1` error
-- Zero runtime cloud/network dependencies; offline demo needs only numpy
-
-## Example Output
+## Example output
 
 ```
-============================================================
-AI6 — Federated Learning Attack Demonstration
-============================================================
-
-[1] Baseline federated learning (no attacks)...
-    Baseline accuracy after 5 rounds: 0.7800
-
-[2] Model update poisoning (sign flip attack)...
-    Accuracy under poisoning: 0.3200
-    Accuracy drop: -0.4600
-
-[3] Gradient inversion attack...
-    Recovered gradient norm: 2.3456
-    Inverted sample shape:  (1, 10)
-    Batch inversion shape:  (3, 10)
-
-[4] Free-rider attack...
-    Honest client accuracy: 0.7100
-    Free-rider accuracy:    0.6900
-    Free-rider got benefit: True
-
-[5] Byzantine tolerance bypass (Krum aggregation)...
-    Krum accuracy (with detection): 0.7200
-    vs poisoned mean: 0.3200
-    Improvement: +0.4000
-
-[6] Trimmed mean aggregation defense...
-    Trimmed mean accuracy: 0.7400
-
-============================================================
-Results Summary:
-  Baseline:          0.7800
-  Under poisoning:   0.3200
-  Krum defense:      0.7200
-  Trimmed defense:   0.7400
-  Free-rider benefit: 0.6900
-============================================================
+[1] Baseline federated learning (no attacks)...      accuracy 0.7800
+[2] Model update poisoning (sign flip)...            accuracy 0.3200, drop -0.4600
+[3] Gradient inversion attack...                     recovered norm, shape (1, 10)
+[4] Free-rider attack...                             benefit True
+[5] Byzantine bypass (Krum)...                       0.7200 (+0.4000 over poisoned)
+[6] Trimmed mean defense...                          0.7400
 ```
 
-## Legal Disclaimer
+## Project structure
 
-**IMPORTANT: Read before use.**
+- `fl_attack.py` — CLI entry point and full attack/defense simulation
+- `tests/` — 7 unit tests (client shapes, mean/Krum/trimmed math, Byzantine detection, determinism, JSON write)
 
-This project is provided for **educational and authorized security testing purposes only**.
+## Legal & authorized use
 
-### Authorization Requirements
-- You MUST have explicit written permission from the system owner before using this tool
-- Unauthorized manipulation of federated learning systems may violate privacy laws
-- This tool should ONLY be used on systems you own or have written authorization to test
+For **educational and authorized security research** only. Run against simulated
+federations you own or lab systems you are explicitly authorized to assess. Do
+not invert gradients from real production models or live federation pools. See
+[ETHICS.md](ETHICS.md), [SCOPE.md](SCOPE.md), and [SECURITY.md](SECURITY.md).
 
-### Legal Framework
-- **Computer Fraud and Abuse Act (CFAA)**: Unauthorized access to computer systems is a federal crime
-- **Privacy Regulations**: Federated learning often involves sensitive data
-- **AI Security Regulations**: Emerging regulations may govern AI/ML system manipulation
-- **Data Protection Laws**: Gradient inversion may reveal private training data
+## Contributing
 
-### Acceptable Use
-- Testing security of your own federated learning systems
-- Authorized red team exercises with written scope
-- Academic research in controlled lab environments
-- Security education and training
-
-### Prohibited Use
-- Attacking federated learning systems without authorization
-- Inverting gradients to steal private training data
-- Any activity that violates applicable laws or regulations
-- Commercial use without proper licensing
-
-### No Warranty
-This software is provided "AS IS" without warranty of any kind. The author is not responsible for any misuse or damage caused by this software.
-
-### Responsible Disclosure
-If you discover vulnerabilities using this tool, follow responsible disclosure practices:
-1. Report to the vendor/owner privately
-2. Allow reasonable time for remediation
-3. Do not exploit beyond proof of concept
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
